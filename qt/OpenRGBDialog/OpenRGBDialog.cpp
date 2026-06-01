@@ -508,6 +508,11 @@ OpenRGBDialog::OpenRGBDialog(QWidget *parent) : QMainWindow(parent), ui(new Ui::
     AddManualDevicesSettingsPage();
 
     /*-----------------------------------------------------*\
+    | Add the Wake Retrigger settings page                  |
+    \*-----------------------------------------------------*/
+    AddWakeRetriggerSettingsPage();
+
+    /*-----------------------------------------------------*\
     | Add the SMBus Tools page if enabled                   |
     \*-----------------------------------------------------*/
     if(ShowI2CTools)
@@ -788,6 +793,23 @@ void OpenRGBDialog::AddManualDevicesSettingsPage()
     TabLabel* SettingsTabLabel = new TabLabel(OpenRGBFont::bulb, (char *)"Manually Added Devices", (char *)context, true);
 
     ui->SettingsTabBar->tabBar()->setTabButton(ui->SettingsTabBar->tabBar()->count() - 1, QTabBar::LeftSide, SettingsTabLabel);
+}
+
+void OpenRGBDialog::AddWakeRetriggerSettingsPage()
+{
+    /*-----------------------------------------------------*\
+    | Create the Wake Retrigger settings page               |
+    \*-----------------------------------------------------*/
+    wakeRetriggerPage = new OpenRGBWakeRetriggerPage();
+
+    ui->SettingsTabBar->addTab(wakeRetriggerPage, "");
+
+    /*-----------------------------------------------------*\
+    | Create the tab label                                  |
+    \*-----------------------------------------------------*/
+    TabLabel* WakeRetriggerTabLabel = new TabLabel(OpenRGBFont::dram, (char *)"Wake Retrigger", (char *)context, true);
+
+    ui->SettingsTabBar->tabBar()->setTabButton(ui->SettingsTabBar->tabBar()->count() - 1, QTabBar::LeftSide, WakeRetriggerTabLabel);
 }
 
 void OpenRGBDialog::AddPlugin(OpenRGBPluginEntry* plugin)
