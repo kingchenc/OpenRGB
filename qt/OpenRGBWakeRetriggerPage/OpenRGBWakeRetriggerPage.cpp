@@ -9,6 +9,7 @@
 
 #include "OpenRGBWakeRetriggerPage.h"
 #include "ResourceManager.h"
+#include "WakeRetriggerVerify.h"
 #include "dmiinfo.h"
 
 #include <QFormLayout>
@@ -130,6 +131,13 @@ void OpenRGBWakeRetriggerPage::on_ScanClicked()
 
     cpu_input->setText(QString::fromStdString(dmi.getProcessor()));
     board_input->setText(QString::fromStdString(board));
+
+    /*-----------------------------------------------------*\
+    | Capture the read-only SMBus fingerprint of the         |
+    | currently installed DRAM alongside the CPU/board so    |
+    | the verification has a reference to compare against.   |
+    \*-----------------------------------------------------*/
+    config.smbus_fingerprint = WakeRetriggerVerify::ComputeSMBusFingerprint();
 
     UpdateCheckboxState();
     SaveConfig();
