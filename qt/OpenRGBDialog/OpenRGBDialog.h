@@ -23,6 +23,7 @@
 #include "OpenRGBSupportedDevicesPage.h"
 #include "OpenRGBSettingsPage.h"
 #include "ManualDevicesSettingsPage/ManualDevicesSettingsPage.h"
+#include "OpenRGBWakeRetriggerPage/OpenRGBWakeRetriggerPage.h"
 
 #include "PluginManager.h"
 #include "SuspendResume.h"
@@ -90,6 +91,7 @@ private:
     OpenRGBSettingsPage *           SettingsPage;
 
     ManualDevicesSettingsPage *     manualDevicesPage;
+    OpenRGBWakeRetriggerPage *      wakeRetriggerPage;
 
     PluginManager *                 plugin_manager      = nullptr;
 
@@ -118,6 +120,7 @@ private:
     void AddPluginsPage();
     void AddConsolePage();
     void AddManualDevicesSettingsPage();
+    void AddWakeRetriggerSettingsPage();
 
     void ClearDevicesList();
     void UpdateDevicesList();
