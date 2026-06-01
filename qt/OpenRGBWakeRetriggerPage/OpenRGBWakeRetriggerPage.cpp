@@ -9,8 +9,12 @@
 
 #include "OpenRGBWakeRetriggerPage.h"
 #include "ResourceManager.h"
+#include "ProfileManager.h"
 #include "WakeRetriggerVerify.h"
+#include "WakeRetriggerTask.h"
 #include "dmiinfo.h"
+
+#define WAKE_RETRIGGER_PROFILE_NAME "WakeRetrigger"
 
 #include <QFormLayout>
 #include <QGroupBox>
@@ -153,9 +157,47 @@ void OpenRGBWakeRetriggerPage::on_FieldsCommitted()
     SaveConfig();
 }
 
-void OpenRGBWakeRetriggerPage::on_RetriggerToggled(bool /*checked*/)
+void OpenRGBWakeRetriggerPage::on_RetriggerToggled(bool checked)
 {
-    SaveConfig();
+    if(checked)
+    {
+        /*-------------------------------------------------*\
+        | Capture a fingerprint if the user enabled the task |
+        | without scanning first                             |
+        \*-------------------------------------------------*/
+        if(config.smbus_fingerprint.empty())
+        {
+            config.smbus_fingerprint = WakeRetriggerVerify::ComputeSMBusFingerprint();
+        }
+
+        /*-------------------------------------------------*\
+        | Snapshot the current device state into a dedicated |
+        | profile that the scheduled task re-applies on wake |
+        \*-------------------------------------------------*/
+        ResourceManager::get()->GetProfileManager()->SaveProfile(WAKE_RETRIGGER_PROFILE_NAME);
+        config.profile_name = WAKE_RETRIGGER_PROFILE_NAME;
+
+        SaveConfig();
+
+        /*-------------------------------------------------*\
+        | Register the scheduled task.  If that fails (e.g.  |
+        | insufficient privileges) revert the checkbox.      |
+        \*-------------------------------------------------*/
+        if(!WakeRetriggerTask::Enable(config.profile_name))
+        {
+            retrigger_checkbox->blockSignals(true);
+            retrigger_checkbox->setChecked(false);
+            retrigger_checkbox->blockSignals(false);
+
+            config.enabled = false;
+            SaveConfig();
+        }
+    }
+    else
+    {
+        WakeRetriggerTask::Disable();
+        SaveConfig();
+    }
 }
 
 void OpenRGBWakeRetriggerPage::UpdateCheckboxState()
