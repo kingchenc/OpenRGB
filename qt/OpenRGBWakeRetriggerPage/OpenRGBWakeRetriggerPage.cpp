@@ -20,6 +20,7 @@
 #include <QGroupBox>
 #include <QIntValidator>
 #include <QLabel>
+#include <QMessageBox>
 #include <QVBoxLayout>
 
 OpenRGBWakeRetriggerPage::OpenRGBWakeRetriggerPage(QWidget* parent) : QWidget(parent)
@@ -180,10 +181,12 @@ void OpenRGBWakeRetriggerPage::on_RetriggerToggled(bool checked)
         SaveConfig();
 
         /*-------------------------------------------------*\
-        | Register the scheduled task.  If that fails (e.g.  |
-        | insufficient privileges) revert the checkbox.      |
+        | Register the scheduled task.  If that fails, show  |
+        | the schtasks output and revert the checkbox.       |
         \*-------------------------------------------------*/
-        if(!WakeRetriggerTask::Enable(config.profile_name))
+        std::string task_error;
+
+        if(!WakeRetriggerTask::Enable(config.profile_name, task_error))
         {
             retrigger_checkbox->blockSignals(true);
             retrigger_checkbox->setChecked(false);
@@ -191,11 +194,18 @@ void OpenRGBWakeRetriggerPage::on_RetriggerToggled(bool checked)
 
             config.enabled = false;
             SaveConfig();
+
+            QMessageBox::warning(this, tr("Wake Retrigger"),
+                tr("Die geplante Aufgabe konnte nicht erstellt werden.\n\n"
+                   "Bitte OpenRGB als Administrator starten. Falls das Problem "
+                   "weiterhin auftritt, meldet schtasks:\n\n%1")
+                    .arg(QString::fromStdString(task_error)));
         }
     }
     else
     {
-        WakeRetriggerTask::Disable();
+        std::string task_error;
+        WakeRetriggerTask::Disable(task_error);
         SaveConfig();
     }
 }
