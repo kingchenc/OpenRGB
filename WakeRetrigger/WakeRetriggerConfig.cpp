@@ -12,12 +12,13 @@
 
 WakeRetriggerConfig::WakeRetriggerConfig()
 {
-    cpu_string   = "";
-    board_string = "";
-    profile_name = "";
-    attempts     = 3;
-    delay        = 2;
-    enabled      = false;
+    cpu_string        = "";
+    board_string      = "";
+    profile_name      = "";
+    smbus_fingerprint = "";
+    attempts          = 3;
+    delay             = 2;
+    enabled           = false;
 }
 
 void WakeRetriggerConfig::Load(SettingsManager* settings_manager)
@@ -42,6 +43,11 @@ void WakeRetriggerConfig::Load(SettingsManager* settings_manager)
     if(settings.contains("profile_name"))
     {
         profile_name = settings["profile_name"];
+    }
+
+    if(settings.contains("smbus_fingerprint"))
+    {
+        smbus_fingerprint = settings["smbus_fingerprint"];
     }
 
     if(settings.contains("attempts"))
@@ -69,12 +75,13 @@ void WakeRetriggerConfig::Save(SettingsManager* settings_manager)
 
     json settings;
 
-    settings["cpu_string"]   = cpu_string;
-    settings["board_string"] = board_string;
-    settings["profile_name"] = profile_name;
-    settings["attempts"]     = attempts;
-    settings["delay"]        = delay;
-    settings["enabled"]      = enabled;
+    settings["cpu_string"]        = cpu_string;
+    settings["board_string"]      = board_string;
+    settings["profile_name"]      = profile_name;
+    settings["smbus_fingerprint"] = smbus_fingerprint;
+    settings["attempts"]          = attempts;
+    settings["delay"]             = delay;
+    settings["enabled"]           = enabled;
 
     settings_manager->SetSettings(WAKE_RETRIGGER_SETTINGS_KEY, settings);
     settings_manager->SaveSettings();
