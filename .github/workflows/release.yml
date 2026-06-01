@@ -73,7 +73,6 @@ jobs:
           Rename-Item -Path release -NewName $name
           Compress-Archive -Path $name -DestinationPath "$name.zip" -Force
           "ASSET_ZIP=$name.zip"            | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "ASSET_EXE=$name\OpenRGB.exe"    | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Compute release tag
         shell: bash
@@ -88,4 +87,3 @@ jobs:
           generate_release_notes: true
           files: |
             ${{ env.ASSET_ZIP }}
-            ${{ env.ASSET_EXE }}
