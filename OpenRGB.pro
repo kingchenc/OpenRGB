@@ -189,6 +189,8 @@ HEADERS +=                                                                      
     dmiinfo/dmiinfo.h                                                                           \
     WakeRetrigger/WakeRetriggerConfig.h                                                         \
     WakeRetrigger/WakeRetriggerVerify.h                                                         \
+    WakeRetrigger/WakeRetriggerRunner.h                                                         \
+    WakeRetrigger/WakeRetriggerTask.h                                                           \
     filesystem.h                                                                                \
     hidapi_wrapper/hidapi_wrapper.h                                                             \
     i2c_smbus/i2c_smbus.h                                                                       \
@@ -251,6 +253,8 @@ SOURCES +=                                                                      
     dmiinfo/dmiinfo.cpp                                                                         \
     WakeRetrigger/WakeRetriggerConfig.cpp                                                       \
     WakeRetrigger/WakeRetriggerVerify.cpp                                                       \
+    WakeRetrigger/WakeRetriggerRunner.cpp                                                       \
+    WakeRetrigger/WakeRetriggerTask.cpp                                                         \
     LogManager.cpp                                                                              \
     NetworkClient.cpp                                                                           \
     NetworkProtocol.cpp                                                                         \
