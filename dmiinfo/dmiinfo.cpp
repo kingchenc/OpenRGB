@@ -29,6 +29,7 @@ DMIInfo::DMIInfo()
     mainboard       = readWMIQuery("SELECT * FROM Win32_BaseBoard", "Product");
     manufacturer    = readWMIQuery("SELECT * FROM Win32_BaseBoard", "Manufacturer");
     product_name    = readWMIQuery("SELECT * FROM Win32_ComputerSystem", "Model");
+    processor       = readWMIQuery("SELECT * FROM Win32_Processor", "Name");
 }
 
 std::string DMIInfo::readWMIQuery(std::string query, std::string key)
@@ -71,6 +72,36 @@ DMIInfo::DMIInfo()
     mainboard       = readFilePath(SYSFS_MB_DMI "/board_name");
     manufacturer    = readFilePath(SYSFS_MB_DMI "/board_vendor");
     product_name    = readFilePath(SYSFS_PC_DMI "/product_name");
+
+    /*-----------------------------------------------------*\
+    | Read the CPU model name from /proc/cpuinfo.  On        |
+    | platforms without /proc/cpuinfo this stays empty.     |
+    \*-----------------------------------------------------*/
+    std::ifstream cpuinfo("/proc/cpuinfo", std::ifstream::in);
+    std::string   cpuinfo_line;
+
+    while(std::getline(cpuinfo, cpuinfo_line))
+    {
+        const std::string key = "model name";
+
+        if(cpuinfo_line.compare(0, key.size(), key) == 0)
+        {
+            std::string::size_type colon = cpuinfo_line.find(':');
+
+            if(colon != std::string::npos)
+            {
+                std::string            value = cpuinfo_line.substr(colon + 1);
+                std::string::size_type start = value.find_first_not_of(" \t");
+
+                if(start != std::string::npos)
+                {
+                    processor = value.substr(start);
+                }
+            }
+            break;
+        }
+    }
+    cpuinfo.close();
 }
 
 std::string DMIInfo::readFilePath(std::string path)
@@ -107,4 +138,9 @@ std::string DMIInfo::getManufacturer()
 std::string DMIInfo::getProductName()
 {
     return product_name;
+}
+
+std::string DMIInfo::getProcessor()
+{
+    return processor;
 }
