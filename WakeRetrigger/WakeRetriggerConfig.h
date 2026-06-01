@@ -37,6 +37,13 @@ public:
     std::string     profile_name;
 
     /*-----------------------------------------------------*\
+    | Read-only SMBus/SPD fingerprint captured when the      |
+    | task was enabled.  Re-checked before every retrigger   |
+    | to guarantee we are on the same hardware (anti-brick). |
+    \*-----------------------------------------------------*/
+    std::string     smbus_fingerprint;
+
+    /*-----------------------------------------------------*\
     | Number of retrigger attempts after a wake event       |
     \*-----------------------------------------------------*/
     unsigned int    attempts;
