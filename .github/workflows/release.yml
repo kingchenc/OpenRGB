@@ -1,0 +1,91 @@
+#-----------------------------------------------------------#
+# build-and-release.yml                                     #
+#                                                           #
+#   Baut den modifizierten OpenRGB-Fork unter Windows        #
+#   (Qt6 + MSVC, qmake/nmake, windeployqt) und erstellt ein  #
+#   GitHub-Release mit der fertigen .exe als Download-Asset.  #
+#                                                           #
+#   Trigger:                                                 #
+#    * workflow_dispatch  -> manueller Erststart / Patch      #
+#    * workflow_run        -> automatisch nach erfolgreichem   #
+#                            "Upstream Sync"-Lauf             #
+#                                                           #
+#   Spiegelt scripts/build-windows.bat (qmake -> nmake ->     #
+#   windeployqt) fuer eine GitHub-hosted Windows-Runner-Umg.  #
+#-----------------------------------------------------------#
+name: Build and Release
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Upstream Sync"]
+    types:
+      - completed
+    branches:
+      - custom
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # Nur bauen, wenn manuell gestartet ODER der Sync-Lauf erfolgreich war.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: custom
+          fetch-depth: 0
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.5.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2019_64
+          cache: true
+
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure build (qmake)
+        shell: cmd
+        run: qmake OpenRGB.pro CONFIG-=debug_and_release CONFIG+=release
+
+      - name: Build (nmake)
+        shell: cmd
+        run: nmake
+
+      - name: Deploy Qt runtime (windeployqt)
+        shell: cmd
+        run: windeployqt --no-patchqt --no-quick-import --no-translations --no-system-d3d-compiler --no-compiler-runtime --no-opengl-sw --no-network .\release\
+
+      - name: Package artifact
+        shell: pwsh
+        run: |
+          $name = "OpenRGB-Custom-Windows-x64"
+          Rename-Item -Path release -NewName $name
+          Compress-Archive -Path $name -DestinationPath "$name.zip" -Force
+          "ASSET_ZIP=$name.zip"            | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ASSET_EXE=$name\OpenRGB.exe"    | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Compute release tag
+        shell: bash
+        run: |
+          echo "TAG=custom-$(date -u +%Y.%m.%d)-${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: OpenRGB Custom Build ${{ env.TAG }}
+          generate_release_notes: true
+          files: |
+            ${{ env.ASSET_ZIP }}
+            ${{ env.ASSET_EXE }}
