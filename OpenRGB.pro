@@ -165,6 +165,7 @@ INCLUDEPATH +=                                                                  
     qt/                                                                                         \
     SPDAccessor/                                                                                \
     SuspendResume/                                                                              \
+    WakeRetrigger/                                                                              \
     dependencies/stb/
 
 HEADERS +=                                                                                      \
@@ -186,6 +187,7 @@ HEADERS +=                                                                      
     Detector.h                                                                                  \
     DeviceDetector.h                                                                            \
     dmiinfo/dmiinfo.h                                                                           \
+    WakeRetrigger/WakeRetriggerConfig.h                                                         \
     filesystem.h                                                                                \
     hidapi_wrapper/hidapi_wrapper.h                                                             \
     i2c_smbus/i2c_smbus.h                                                                       \
@@ -246,6 +248,7 @@ SOURCES +=                                                                      
     startup/startup.cpp                                                                         \
     cli.cpp                                                                                     \
     dmiinfo/dmiinfo.cpp                                                                         \
+    WakeRetrigger/WakeRetriggerConfig.cpp                                                       \
     LogManager.cpp                                                                              \
     NetworkClient.cpp                                                                           \
     NetworkProtocol.cpp                                                                         \
