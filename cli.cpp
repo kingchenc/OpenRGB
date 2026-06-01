@@ -22,6 +22,7 @@
 #include "NetworkServer.h"
 #include "LogManager.h"
 #include "Colors.h"
+#include "WakeRetriggerRunner.h"
 
 /*-------------------------------------------------------------*\
 | Quirk for MSVC; which doesn't support this case-insensitive   |
@@ -35,6 +36,7 @@
 using namespace std::chrono_literals;
 
 static std::string                 profile_save_filename = "";
+static bool                        wake_trigger_requested = false;
 const unsigned int                 brightness_percentage = 100;
 const unsigned int                 speed_percentage      = 100;
 
@@ -417,6 +419,7 @@ void OptionHelp()
     help_text += "-V,  --version                           Display version and software build information\n";
     help_text += "-p,  --profile filename[.orp]            Load the profile from filename/filename.orp\n";
     help_text += "-sp, --save-profile filename.orp         Save the given settings to profile filename.orp\n";
+    help_text += "--wake-trigger                           Verify hardware, then re-apply the configured Wake Retrigger profile and exit (used by the scheduled task)\n";
     help_text += "--i2c-tools                              Shows the I2C/SMBus Tools page in the GUI. Implies --gui, even if not specified.\n";
     help_text += "                                           USE I2C TOOLS AT YOUR OWN RISK! Don't use this option if you don't know what you're doing!\n";
     help_text += "                                           There is a risk of bricking your motherboard, RGB controller, and RAM if you send invalid SMBus/I2C transactions.\n";
@@ -1093,7 +1096,8 @@ int ProcessOptions(Options* options, std::vector<RGBController *>& rgb_controlle
              ||(option == "--help" || option == "-h")
              ||(option == "--version" || option == "-V")
              ||(option == "--autostart-check")
-             ||(option == "--autostart-disable"))
+             ||(option == "--autostart-disable")
+             ||(option == "--wake-trigger"))
             {
                 /*-------------------------------------------------*\
                 | Do nothing, these are pre-detection arguments     |
@@ -1695,6 +1699,16 @@ unsigned int cli_pre_detection(int argc, char* argv[])
         }
 
         /*---------------------------------------------------------*\
+        | --wake-trigger (no arguments): run the post-standby RGB   |
+        | retrigger after detection, then exit                      |
+        \*---------------------------------------------------------*/
+        else if(option == "--wake-trigger")
+        {
+            wake_trigger_requested = true;
+            ret_flags |= RET_FLAG_CLI_POST_DETECTION;
+        }
+
+        /*---------------------------------------------------------*\
         | Any unrecognized arguments trigger the post-detection CLI |
         \*---------------------------------------------------------*/
         else
@@ -1738,6 +1752,17 @@ unsigned int cli_post_detection()
     | Get controller list from resource manager                 |
     \*---------------------------------------------------------*/
     std::vector<RGBController *> rgb_controllers = ResourceManager::get()->GetRGBControllers();
+
+    /*---------------------------------------------------------*\
+    | If launched with --wake-trigger, verify the hardware and  |
+    | re-apply the configured profile, then exit.  Nothing is   |
+    | sent to hardware if verification fails.                   |
+    \*---------------------------------------------------------*/
+    if(wake_trigger_requested)
+    {
+        bool wake_ok = WakeRetriggerRunner::Run(rgb_controllers);
+        exit(wake_ok ? 0 : -1);
+    }
 
     /*---------------------------------------------------------*\
     | Process the argument options                              |
