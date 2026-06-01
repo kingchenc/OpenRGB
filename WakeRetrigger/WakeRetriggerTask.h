@@ -20,12 +20,14 @@ namespace WakeRetriggerTask
     /*-----------------------------------------------------*\
     | Create (or replace) the scheduled task.  profile_name  |
     | is the profile passed to the relaunched instance.      |
-    | Returns true on success.                               |
+    | Returns true on success; on failure error_out holds    |
+    | the schtasks output (e.g. an access-denied message).   |
     \*-----------------------------------------------------*/
-    bool Enable(const std::string& profile_name);
+    bool Enable(const std::string& profile_name, std::string& error_out);
 
     /*-----------------------------------------------------*\
-    | Delete the scheduled task.  Returns true on success.   |
+    | Delete the scheduled task.  Returns true on success;   |
+    | error_out holds the schtasks output on failure.        |
     \*-----------------------------------------------------*/
-    bool Disable();
+    bool Disable(std::string& error_out);
 }
