@@ -15,6 +15,7 @@
 #include "SPDDetector.h"
 #include "SPDWrapper.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <iomanip>
 #include <sstream>
@@ -28,6 +29,56 @@ static bool wake_retrigger_contains(const std::string& haystack, const std::stri
     }
 
     return haystack.find(needle) != std::string::npos;
+}
+
+/*---------------------------------------------------------*\
+| Split a fingerprint into one normalised token per DRAM    |
+| module.  Each module entry ends in ';'; the trailing      |
+| whitespace inside an entry is stripped because DDR5       |
+| part-number SPD fields are space/null padded and the SPD  |
+| trimmer keeps one pad byte, so otherwise-identical reads  |
+| jitter by trailing spaces.  Normalising here is what      |
+| makes the compare tolerant.                               |
+\*---------------------------------------------------------*/
+static std::vector<std::string> wake_retrigger_tokens(const std::string& fingerprint)
+{
+    std::vector<std::string>    tokens;
+    std::string                 token;
+    std::istringstream          stream(fingerprint);
+
+    while(std::getline(stream, token, ';'))
+    {
+        std::size_t end = token.find_last_not_of(" \t");
+
+        if(end == std::string::npos)
+        {
+            continue;
+        }
+
+        tokens.push_back(token.substr(0, end + 1));
+    }
+
+    return tokens;
+}
+
+/*---------------------------------------------------------*\
+| Order-independent canonical form of a fingerprint, used   |
+| only to decide whether two live reads agree.              |
+\*---------------------------------------------------------*/
+static std::string wake_retrigger_canonical(const std::string& fingerprint)
+{
+    std::vector<std::string>    tokens = wake_retrigger_tokens(fingerprint);
+    std::sort(tokens.begin(), tokens.end());
+
+    std::string                 canonical;
+
+    for(std::size_t i = 0; i < tokens.size(); i++)
+    {
+        canonical += tokens[i];
+        canonical += ";";
+    }
+
+    return canonical;
 }
 
 std::string WakeRetriggerVerify::ComputeSMBusFingerprint()
@@ -62,6 +113,38 @@ std::string WakeRetriggerVerify::ComputeSMBusFingerprint()
     }
 
     return fingerprint.str();
+}
+
+std::string WakeRetriggerVerify::ComputeStableSMBusFingerprint()
+{
+    /*-----------------------------------------------------*\
+    | SPD reads share the SMBus with the running DRAM RGB    |
+    | controller, so a single read can come back partial    |
+    | (a module dropping out) or with corrupted padding     |
+    | bytes.  Read repeatedly until two consecutive reads   |
+    | agree on their canonical form, then trust that read.   |
+    | Every iteration only reads the SPD - no module is     |
+    | ever written - so retrying cannot brick anything.     |
+    \*-----------------------------------------------------*/
+    const int       max_attempts = 6;
+    std::string     previous     = ComputeSMBusFingerprint();
+    std::string     previous_key = wake_retrigger_canonical(previous);
+
+    for(int attempt = 1; attempt < max_attempts; attempt++)
+    {
+        std::string current     = ComputeSMBusFingerprint();
+        std::string current_key  = wake_retrigger_canonical(current);
+
+        if(!current_key.empty() && current_key == previous_key)
+        {
+            return current;
+        }
+
+        previous     = current;
+        previous_key = current_key;
+    }
+
+    return previous;
 }
 
 bool WakeRetriggerVerify::Verify(const WakeRetriggerConfig& config, std::string& failure_reason)
@@ -100,9 +183,13 @@ bool WakeRetriggerVerify::Verify(const WakeRetriggerConfig& config, std::string&
     }
 
     /*-----------------------------------------------------*\
-    | Stage 3: live SMBus fingerprint must match the stored |
-    | one.  An empty stored fingerprint is treated as a     |
-    | failure - we never proceed without a reference.       |
+    | Stage 3: every DRAM module captured when the feature  |
+    | was enabled must still be present in a live SPD read.  |
+    | The live read is taken with a retry-until-stable pass  |
+    | (SMBus contention can corrupt a single read) and the   |
+    | compare is tolerant of part-number padding jitter.     |
+    | An empty stored fingerprint is treated as a failure -  |
+    | we never proceed without a reference.                  |
     \*-----------------------------------------------------*/
     if(config.smbus_fingerprint.empty())
     {
@@ -110,12 +197,24 @@ bool WakeRetriggerVerify::Verify(const WakeRetriggerConfig& config, std::string&
         return false;
     }
 
-    std::string live = ComputeSMBusFingerprint();
+    std::vector<std::string> stored_tokens = wake_retrigger_tokens(config.smbus_fingerprint);
 
-    if(live != config.smbus_fingerprint)
+    if(stored_tokens.empty())
     {
-        failure_reason = "SMBus fingerprint mismatch (stored '" + config.smbus_fingerprint + "', read '" + live + "')";
+        failure_reason = "Stored SMBus fingerprint holds no DRAM module; refusing to proceed";
         return false;
+    }
+
+    std::string                 live        = ComputeStableSMBusFingerprint();
+    std::vector<std::string>    live_tokens = wake_retrigger_tokens(live);
+
+    for(std::size_t i = 0; i < stored_tokens.size(); i++)
+    {
+        if(std::find(live_tokens.begin(), live_tokens.end(), stored_tokens[i]) == live_tokens.end())
+        {
+            failure_reason = "SMBus fingerprint mismatch (stored '" + config.smbus_fingerprint + "', read '" + live + "')";
+            return false;
+        }
     }
 
     failure_reason = "";
