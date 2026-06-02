@@ -13,6 +13,8 @@
 
 #pragma once
 
+#include <functional>
+#include <string>
 #include <vector>
 
 class RGBController;
@@ -25,6 +27,12 @@ namespace WakeRetriggerRunner
     | seconds between attempts.  Returns true if the         |
     | verification passed and the loop ran, false if         |
     | verification failed (in which case NO command is sent).|
+    |                                                        |
+    | When log_sink is set it receives a human-readable line |
+    | for each step (verification, per attempt, per device), |
+    | which the settings page uses to drive its live "Test"  |
+    | log window.  It is always safe to leave it unset.      |
     \*-----------------------------------------------------*/
-    bool Run(std::vector<RGBController*>& rgb_controllers);
+    bool Run(std::vector<RGBController*>& rgb_controllers,
+             const std::function<void(const std::string&)>& log_sink = nullptr);
 }
