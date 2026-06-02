@@ -7,7 +7,9 @@
 |   when the feature was enabled:                           |
 |     1. CPU name contains the stored string                |
 |     2. Mainboard name contains the stored string          |
-|     3. Live SMBus/SPD fingerprint equals the stored one   |
+|     3. Every stored DRAM module is still present in a      |
+|        live SPD read (read-only, retry-until-stable,       |
+|        padding-tolerant compare)                           |
 |   Any mismatch aborts (bricking protection).              |
 |                                                           |
 |   This file is part of the OpenRGB project                |
@@ -27,6 +29,15 @@ namespace WakeRetriggerVerify
     | part number).  No writes are ever issued.             |
     \*-----------------------------------------------------*/
     std::string ComputeSMBusFingerprint();
+
+    /*-----------------------------------------------------*\
+    | Same fingerprint, but read repeatedly until two       |
+    | consecutive reads agree.  SPD access shares the SMBus |
+    | with the running DRAM RGB controller, so a single     |
+    | read can come back partial or with corrupted padding; |
+    | retrying (still read-only) returns a trustworthy read.|
+    \*-----------------------------------------------------*/
+    std::string ComputeStableSMBusFingerprint();
 
     /*-----------------------------------------------------*\
     | Run the full 3-stage verification.  Returns true only |
