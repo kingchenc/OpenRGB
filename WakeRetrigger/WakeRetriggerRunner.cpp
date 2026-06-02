@@ -130,8 +130,20 @@ static void wake_retrigger_apply_with_nudge(RGBController* device)
     device->DeviceUpdateLEDs();
 }
 
-bool WakeRetriggerRunner::Run(std::vector<RGBController*>& rgb_controllers)
+bool WakeRetriggerRunner::Run(std::vector<RGBController*>& rgb_controllers,
+                              const std::function<void(const std::string&)>& log_sink)
 {
+    /*-----------------------------------------------------*\
+    | Forward a line to the optional log sink (no-op unset)  |
+    \*-----------------------------------------------------*/
+    auto emit = [&log_sink](const std::string& line)
+    {
+        if(log_sink)
+        {
+            log_sink(line);
+        }
+    };
+
     /*-----------------------------------------------------*\
     | Load the stored configuration                         |
     \*-----------------------------------------------------*/
@@ -146,11 +158,17 @@ bool WakeRetriggerRunner::Run(std::vector<RGBController*>& rgb_controllers)
     if(!WakeRetriggerVerify::Verify(config, failure_reason))
     {
         LOG_ERROR("[WakeRetrigger] Verification failed, aborting: %s", failure_reason.c_str());
+        emit("Verifikation fehlgeschlagen: " + failure_reason);
         return false;
     }
 
     LOG_INFO("[WakeRetrigger] Verification passed; re-applying profile '%s' (%u attempts, %u s delay)",
              config.profile_name.c_str(), config.attempts, config.delay);
+
+    emit("Verifikation OK (CPU + Mainboard + RAM-Fingerprint).");
+    emit("Profil '" + config.profile_name + "', " + std::to_string(config.attempts)
+         + " Versuch(e), " + std::to_string(config.delay) + " s Verzoegerung.");
+    emit(std::to_string(rgb_controllers.size()) + " Geraet(e) erkannt.");
 
     /*-----------------------------------------------------*\
     | Re-apply the profile config.attempts times.  Each      |
@@ -162,6 +180,9 @@ bool WakeRetriggerRunner::Run(std::vector<RGBController*>& rgb_controllers)
     \*-----------------------------------------------------*/
     for(unsigned int attempt = 0; attempt < config.attempts; attempt++)
     {
+        emit("--- Versuch " + std::to_string(attempt + 1) + "/"
+             + std::to_string(config.attempts) + " ---");
+
         if(!config.profile_name.empty())
         {
             ResourceManager::get()->GetProfileManager()->LoadProfile(config.profile_name);
@@ -170,15 +191,19 @@ bool WakeRetriggerRunner::Run(std::vector<RGBController*>& rgb_controllers)
         for(std::size_t i = 0; i < rgb_controllers.size(); i++)
         {
             wake_retrigger_apply_with_nudge(rgb_controllers[i]);
+            emit("  angewendet: " + rgb_controllers[i]->name);
         }
 
         LOG_INFO("[WakeRetrigger] Attempt %u/%u applied (with nudge)", attempt + 1, config.attempts);
 
         if(config.delay > 0)
         {
+            emit("  warte " + std::to_string(config.delay) + " s ...");
             std::this_thread::sleep_for(std::chrono::seconds(config.delay));
         }
     }
+
+    emit("Sequenz abgeschlossen.");
 
     return true;
 }
