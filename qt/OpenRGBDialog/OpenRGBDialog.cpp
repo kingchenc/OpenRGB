@@ -445,7 +445,7 @@ OpenRGBDialog::OpenRGBDialog(QWidget *parent) : QMainWindow(parent), ui(new Ui::
         settings_manager->SaveSettings();
     }
 
-    trayIcon->setToolTip("OpenRGB");
+    trayIcon->setToolTip("OpenRGB Modified by KingchenC");
     trayIcon->setContextMenu(trayIconMenu);
     trayIcon->show();
 
