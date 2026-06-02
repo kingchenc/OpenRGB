@@ -10,17 +10,27 @@
 #include "OpenRGBWakeRetriggerPage.h"
 #include "ResourceManager.h"
 #include "ProfileManager.h"
+#include "RGBController.h"
 #include "WakeRetriggerVerify.h"
+#include "WakeRetriggerRunner.h"
 #include "WakeRetriggerTask.h"
 #include "dmiinfo.h"
 
 #define WAKE_RETRIGGER_PROFILE_NAME "WakeRetrigger"
 
+#include <functional>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include <QDialog>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QIntValidator>
 #include <QLabel>
 #include <QMessageBox>
+#include <QPlainTextEdit>
+#include <QPointer>
 #include <QVBoxLayout>
 
 OpenRGBWakeRetriggerPage::OpenRGBWakeRetriggerPage(QWidget* parent) : QWidget(parent)
@@ -39,6 +49,7 @@ OpenRGBWakeRetriggerPage::OpenRGBWakeRetriggerPage(QWidget* parent) : QWidget(pa
     attempts_input     = new QLineEdit(this);
     delay_input        = new QLineEdit(this);
     retrigger_checkbox = new QCheckBox(tr("Nach Standby retrigger via Aufgabenplanung"), this);
+    test_button        = new QPushButton(tr("Test jetzt (Sequenz live ausfuehren)"), this);
 
     attempts_input->setValidator(new QIntValidator(1, 9999, this));
     delay_input->setValidator(new QIntValidator(0, 9999, this));
@@ -60,6 +71,13 @@ OpenRGBWakeRetriggerPage::OpenRGBWakeRetriggerPage(QWidget* parent) : QWidget(pa
     retrigger_checkbox->setChecked(config.enabled);
 
     /*-----------------------------------------------------*\
+    | The live test runs the scheduled sequence on demand.   |
+    | It only makes sense once the fingerprint is present    |
+    | and the standby task is enabled, so it starts disabled.|
+    \*-----------------------------------------------------*/
+    test_button->setEnabled(false);
+
+    /*-----------------------------------------------------*\
     | Lay out the hardware fingerprint group                |
     \*-----------------------------------------------------*/
     QFormLayout* hw_form = new QFormLayout();
@@ -77,6 +95,7 @@ OpenRGBWakeRetriggerPage::OpenRGBWakeRetriggerPage(QWidget* parent) : QWidget(pa
     loop_form->addRow(tr("Versuche:"), attempts_input);
     loop_form->addRow(tr("Verzoegerung (s):"), delay_input);
     loop_form->addRow(retrigger_checkbox);
+    loop_form->addRow(test_button);
 
     QGroupBox* loop_group = new QGroupBox(tr("Retrigger nach Standby"), this);
     loop_group->setLayout(loop_form);
@@ -108,6 +127,7 @@ OpenRGBWakeRetriggerPage::OpenRGBWakeRetriggerPage(QWidget* parent) : QWidget(pa
     connect(attempts_input,     &QLineEdit::editingFinished, this, &OpenRGBWakeRetriggerPage::on_FieldsCommitted);
     connect(delay_input,        &QLineEdit::editingFinished, this, &OpenRGBWakeRetriggerPage::on_FieldsCommitted);
     connect(retrigger_checkbox, &QCheckBox::toggled,        this, &OpenRGBWakeRetriggerPage::on_RetriggerToggled);
+    connect(test_button,        &QPushButton::clicked,      this, &OpenRGBWakeRetriggerPage::on_TestClicked);
 
     /*-----------------------------------------------------*\
     | Apply the initial enabled state                       |
@@ -208,6 +228,100 @@ void OpenRGBWakeRetriggerPage::on_RetriggerToggled(bool checked)
         WakeRetriggerTask::Disable(task_error);
         SaveConfig();
     }
+
+    /*-----------------------------------------------------*\
+    | Refresh the live-test button (tied to the task state)  |
+    \*-----------------------------------------------------*/
+    UpdateCheckboxState();
+}
+
+void OpenRGBWakeRetriggerPage::on_TestClicked()
+{
+    /*-----------------------------------------------------*\
+    | Build a non-modal log window for the test run          |
+    \*-----------------------------------------------------*/
+    QDialog* dlg = new QDialog(this);
+    dlg->setWindowTitle(tr("Wake Retrigger - Test"));
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+
+    QVBoxLayout*    dlg_layout = new QVBoxLayout(dlg);
+    QPlainTextEdit* log_view   = new QPlainTextEdit(dlg);
+    log_view->setReadOnly(true);
+    log_view->setMinimumSize(560, 320);
+    dlg_layout->addWidget(log_view);
+
+    QPushButton* close_button = new QPushButton(tr("Schliessen"), dlg);
+    close_button->setEnabled(false);
+    dlg_layout->addWidget(close_button);
+    connect(close_button, &QPushButton::clicked, dlg, &QDialog::accept);
+
+    dlg->show();
+
+    test_button->setEnabled(false);
+    log_view->appendPlainText(tr("Starte Test - dieselbe Sequenz wie der geplante Task "
+                                 "(Verifikation, Profil laden, Nudge-Apply pro Geraet)."));
+
+    /*-----------------------------------------------------*\
+    | Snapshot the live controllers and run the real         |
+    | sequence on a worker thread so the UI stays responsive |
+    | during the per-attempt delays.  Log lines and the      |
+    | finished state are marshalled back to the GUI thread.  |
+    \*-----------------------------------------------------*/
+    std::vector<RGBController*> controllers = ResourceManager::get()->GetRGBControllers();
+
+    QPointer<QPlainTextEdit> safe_log   = log_view;
+    QPointer<QPushButton>    safe_close  = close_button;
+    QPointer<QPushButton>    safe_test   = test_button;
+
+    std::thread([controllers, safe_log, safe_close, safe_test]() mutable
+    {
+        auto post = [](QObject* target, std::function<void()> fn)
+        {
+            if(target != nullptr)
+            {
+                QMetaObject::invokeMethod(target, fn, Qt::QueuedConnection);
+            }
+        };
+
+        auto sink = [safe_log, post](const std::string& line)
+        {
+            const QString qline = QString::fromStdString(line);
+            post(safe_log, [safe_log, qline]()
+            {
+                if(safe_log)
+                {
+                    safe_log->appendPlainText(qline);
+                }
+            });
+        };
+
+        bool ok = WakeRetriggerRunner::Run(controllers, sink);
+
+        const QString done = ok ? QObject::tr("Test erfolgreich abgeschlossen.")
+                                : QObject::tr("Test fehlgeschlagen - siehe Meldung oben.");
+
+        post(safe_log, [safe_log, done]()
+        {
+            if(safe_log)
+            {
+                safe_log->appendPlainText(done);
+            }
+        });
+        post(safe_close, [safe_close]()
+        {
+            if(safe_close)
+            {
+                safe_close->setEnabled(true);
+            }
+        });
+        post(safe_test, [safe_test]()
+        {
+            if(safe_test)
+            {
+                safe_test->setEnabled(true);
+            }
+        });
+    }).detach();
 }
 
 void OpenRGBWakeRetriggerPage::UpdateCheckboxState()
@@ -224,6 +338,13 @@ void OpenRGBWakeRetriggerPage::UpdateCheckboxState()
     {
         retrigger_checkbox->setChecked(false);
     }
+
+    /*-----------------------------------------------------*\
+    | The live test mirrors the scheduled task, so it is     |
+    | only offered once CPU + mainboard are set AND the      |
+    | standby retrigger is enabled.                          |
+    \*-----------------------------------------------------*/
+    test_button->setEnabled(ready && retrigger_checkbox->isChecked());
 }
 
 void OpenRGBWakeRetriggerPage::SaveConfig()
