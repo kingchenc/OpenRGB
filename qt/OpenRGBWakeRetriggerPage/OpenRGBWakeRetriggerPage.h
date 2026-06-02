@@ -33,6 +33,7 @@ private slots:
     void on_FieldsChanged();
     void on_FieldsCommitted();
     void on_RetriggerToggled(bool checked);
+    void on_TestClicked();
 
 private:
     void UpdateCheckboxState();
@@ -44,6 +45,7 @@ private:
     QLineEdit*          attempts_input;
     QLineEdit*          delay_input;
     QCheckBox*          retrigger_checkbox;
+    QPushButton*        test_button;
 
     WakeRetriggerConfig config;
 };
