@@ -29,34 +29,73 @@ static const std::chrono::milliseconds WAKE_RETRIGGER_NUDGE_DELAY(120);
 | Apply the controller's currently loaded (target) state in  |
 | a way the hardware actually honours after a wake.          |
 |                                                            |
-| Re-sending a value identical to what the device already    |
-| holds is a no-op for many controllers (e.g. setting "off"  |
-| again leaves the LEDs on after standby).  So we first push |
-| a minimally different state, wait briefly, then restore    |
-| the real target - forcing a genuine 0 -> 1 -> 0 transition.|
+| Two distinct post-standby failure modes are defeated here: |
+|                                                            |
+| 1. Lost software-control handshake.  DRAM stays powered    |
+|    across S3 (suspend-to-RAM uses self-refresh), so a DRAM  |
+|    RGB controller keeps its mode register but drops the     |
+|    host's software-control state on resume and reverts to   |
+|    its autonomous onboard effect.  Drivers like Kingston    |
+|    FURY only re-issue that handshake (their "preamble")     |
+|    when the mode actually CHANGES, so re-applying the same  |
+|    "off" mode is ignored and the LEDs stay lit.  We force   |
+|    a real mode change (target -> neighbour -> target) to    |
+|    make the driver re-send the handshake.  The interim mode |
+|    is driven at minimum brightness so it produces no flash. |
+|                                                            |
+| 2. No-op value writes.  Re-sending a frame identical to    |
+|    what the device (or a per-register write cache) already  |
+|    holds is a no-op for many controllers.  We push a        |
+|    minimally different frame, wait, then restore the real   |
+|    target - a genuine 0 -> 1 -> 0 transition.  This also    |
+|    covers single-mode / per-LED-only devices with no second |
+|    mode to cycle through.                                   |
 \*---------------------------------------------------------*/
 static void wake_retrigger_apply_with_nudge(RGBController* device)
 {
+    const int  target_mode    = device->active_mode;
+    const bool target_mode_ok =
+        target_mode >= 0 && target_mode < (int)device->modes.size();
+
     /*-----------------------------------------------------*\
     | Snapshot the target state (already loaded by the       |
-    | profile) so we can restore it after the nudge.         |
+    | profile) so we can restore it after the nudges.        |
     \*-----------------------------------------------------*/
     std::vector<RGBColor> target_colors = device->colors;
 
-    mode*        active            = nullptr;
-    unsigned int target_brightness = 0;
+    mode*        active            = target_mode_ok ? &device->modes[target_mode] : nullptr;
+    unsigned int target_brightness = (active != nullptr) ? active->brightness : 0;
 
-    if(device->active_mode >= 0 && device->active_mode < (int)device->modes.size())
+    /*-----------------------------------------------------*\
+    | Mode-cycle nudge - re-arms the software-control        |
+    | handshake on controllers that only send it on a mode   |
+    | change (failure mode 1 above).                         |
+    \*-----------------------------------------------------*/
+    if(target_mode_ok && device->modes.size() > 1)
     {
-        active            = &device->modes[device->active_mode];
-        target_brightness = active->brightness;
+        const int    nudge_mode    = (target_mode + 1) % (int)device->modes.size();
+        mode*        nudge         = &device->modes[nudge_mode];
+        unsigned int saved_bright  = nudge->brightness;
+
+        if(nudge->flags & MODE_FLAG_HAS_BRIGHTNESS)
+        {
+            nudge->brightness = nudge->brightness_min;
+        }
+
+        device->active_mode = nudge_mode;
+        device->DeviceUpdateMode();
+
+        std::this_thread::sleep_for(WAKE_RETRIGGER_NUDGE_DELAY);
+
+        nudge->brightness   = saved_bright;
+        device->active_mode = target_mode;
     }
 
     /*-----------------------------------------------------*\
-    | Nudge: flip the least-significant bit of every channel |
-    | (visually negligible, but guaranteed different - "0"   |
-    | becomes "1"), and step the brightness by one if the    |
-    | mode exposes a brightness range.                       |
+    | Value nudge: flip the least-significant bit of every   |
+    | channel (visually negligible, but guaranteed different |
+    | - "0" becomes "1"), and step the brightness by one if  |
+    | the mode exposes a brightness range (failure mode 2).  |
     \*-----------------------------------------------------*/
     for(std::size_t led = 0; led < device->colors.size(); led++)
     {
