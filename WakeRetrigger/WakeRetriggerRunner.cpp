@@ -26,57 +26,86 @@
 static const std::chrono::milliseconds WAKE_RETRIGGER_NUDGE_DELAY(120);
 
 /*---------------------------------------------------------*\
-| Apply the controller's currently loaded (target) state in  |
-| a way the hardware actually honours after a wake.          |
+| Force a single DRAM controller fully OFF in a way the      |
+| hardware actually honours after a wake.                    |
 |                                                            |
-| Two distinct post-standby failure modes are defeated here: |
+| Goal: only the RAM is touched, and it ends up dark - not   |
+| reset to a coloured default and not via a multi-device     |
+| profile that would also clobber the keyboard/mouse/GPU.    |
 |                                                            |
-| 1. Lost software-control handshake.  DRAM stays powered    |
-|    across S3 (suspend-to-RAM uses self-refresh), so a DRAM  |
-|    RGB controller keeps its mode register but drops the     |
-|    host's software-control state on resume and reverts to   |
-|    its autonomous onboard effect.  Drivers like Kingston    |
-|    FURY only re-issue that handshake (their "preamble")     |
-|    when the mode actually CHANGES, so re-applying the same  |
-|    "off" mode is ignored and the LEDs stay lit.  We force   |
-|    a real mode change (target -> neighbour -> target) to    |
-|    make the driver re-send the handshake.  The interim mode |
-|    is driven at minimum brightness so it produces no flash. |
-|                                                            |
-| 2. No-op value writes.  Re-sending a frame identical to    |
-|    what the device (or a per-register write cache) already  |
-|    holds is a no-op for many controllers.  We push a        |
-|    minimally different frame, wait, then restore the real   |
-|    target - a genuine 0 -> 1 -> 0 transition.  This also    |
-|    covers single-mode / per-LED-only devices with no second |
-|    mode to cycle through.                                   |
+| The hard part is the software-control handshake.  DRAM     |
+| stays powered across S3 (suspend-to-RAM uses self-refresh),|
+| so the controller keeps its mode register but drops the    |
+| host's software-control state on resume and reverts to its |
+| autonomous onboard effect.  Drivers like Kingston FURY only|
+| re-issue that handshake (their "preamble") when the mode    |
+| actually CHANGES, so re-applying the same mode is ignored  |
+| and the LEDs stay lit.  We therefore cycle through a second |
+| mode (blanked, so it never flashes) to force the handshake,|
+| then land on a per-LED mode with every LED set to black.   |
 \*---------------------------------------------------------*/
-static void wake_retrigger_apply_with_nudge(RGBController* device)
+static void wake_retrigger_force_off(RGBController* device)
 {
-    const int  target_mode    = device->active_mode;
-    const bool target_mode_ok =
-        target_mode >= 0 && target_mode < (int)device->modes.size();
-
-    /*-----------------------------------------------------*\
-    | Snapshot the target state (already loaded by the       |
-    | profile) so we can restore it after the nudges.        |
-    \*-----------------------------------------------------*/
-    std::vector<RGBColor> target_colors = device->colors;
-
-    mode*        active            = target_mode_ok ? &device->modes[target_mode] : nullptr;
-    unsigned int target_brightness = (active != nullptr) ? active->brightness : 0;
-
-    /*-----------------------------------------------------*\
-    | Mode-cycle nudge - re-arms the software-control        |
-    | handshake on controllers that only send it on a mode   |
-    | change (failure mode 1 above).                         |
-    \*-----------------------------------------------------*/
-    if(target_mode_ok && device->modes.size() > 1)
+    if(device->modes.empty())
     {
-        const int    nudge_mode    = (target_mode + 1) % (int)device->modes.size();
-        mode*        nudge         = &device->modes[nudge_mode];
-        unsigned int saved_bright  = nudge->brightness;
+        for(std::size_t led = 0; led < device->colors.size(); led++)
+        {
+            device->colors[led] = 0;
+        }
+        device->DeviceUpdateLEDs();
+        return;
+    }
 
+    /*-----------------------------------------------------*\
+    | Pick a per-LED mode (e.g. Direct) so we can blacken    |
+    | every LED; fall back to the current/first mode.        |
+    \*-----------------------------------------------------*/
+    int off_mode = device->active_mode >= 0
+                 && device->active_mode < (int)device->modes.size()
+                 ? device->active_mode : 0;
+
+    for(std::size_t i = 0; i < device->modes.size(); i++)
+    {
+        if(device->modes[i].flags & MODE_FLAG_HAS_PER_LED_COLOR)
+        {
+            off_mode = (int)i;
+            break;
+        }
+    }
+
+    /*-----------------------------------------------------*\
+    | Blacken everything the off mode can show               |
+    \*-----------------------------------------------------*/
+    for(std::size_t led = 0; led < device->colors.size(); led++)
+    {
+        device->colors[led] = 0;
+    }
+    for(std::size_t c = 0; c < device->modes[off_mode].colors.size(); c++)
+    {
+        device->modes[off_mode].colors[c] = 0;
+    }
+    if(device->modes[off_mode].flags & MODE_FLAG_HAS_BRIGHTNESS)
+    {
+        device->modes[off_mode].brightness = device->modes[off_mode].brightness_min;
+    }
+
+    /*-----------------------------------------------------*\
+    | Mode-cycle to force the software-control handshake.    |
+    | The interim mode is blanked (colours black + minimum   |
+    | brightness) and restored afterwards so it never flashes|
+    | and the user's stored mode definitions stay intact.    |
+    \*-----------------------------------------------------*/
+    if(device->modes.size() > 1)
+    {
+        const int             nudge_mode   = (off_mode + 1) % (int)device->modes.size();
+        mode*                 nudge        = &device->modes[nudge_mode];
+        const unsigned int    saved_bright = nudge->brightness;
+        std::vector<RGBColor> saved_colors = nudge->colors;
+
+        for(std::size_t c = 0; c < nudge->colors.size(); c++)
+        {
+            nudge->colors[c] = 0;
+        }
         if(nudge->flags & MODE_FLAG_HAS_BRIGHTNESS)
         {
             nudge->brightness = nudge->brightness_min;
@@ -87,45 +116,14 @@ static void wake_retrigger_apply_with_nudge(RGBController* device)
 
         std::this_thread::sleep_for(WAKE_RETRIGGER_NUDGE_DELAY);
 
-        nudge->brightness   = saved_bright;
-        device->active_mode = target_mode;
+        nudge->brightness = saved_bright;
+        nudge->colors     = saved_colors;
     }
 
     /*-----------------------------------------------------*\
-    | Value nudge: flip the least-significant bit of every   |
-    | channel (visually negligible, but guaranteed different |
-    | - "0" becomes "1"), and step the brightness by one if  |
-    | the mode exposes a brightness range (failure mode 2).  |
+    | Land on the blacked-out off mode                      |
     \*-----------------------------------------------------*/
-    for(std::size_t led = 0; led < device->colors.size(); led++)
-    {
-        device->colors[led] = target_colors[led] ^ 0x00010101;
-    }
-
-    if(active != nullptr
-    && (active->flags & MODE_FLAG_HAS_BRIGHTNESS)
-    && active->brightness_max > active->brightness_min)
-    {
-        active->brightness = (target_brightness < active->brightness_max)
-                               ? target_brightness + 1
-                               : target_brightness - 1;
-    }
-
-    device->DeviceUpdateMode();
-    device->DeviceUpdateLEDs();
-
-    std::this_thread::sleep_for(WAKE_RETRIGGER_NUDGE_DELAY);
-
-    /*-----------------------------------------------------*\
-    | Restore and push the real target state                |
-    \*-----------------------------------------------------*/
-    device->colors = target_colors;
-
-    if(active != nullptr)
-    {
-        active->brightness = target_brightness;
-    }
-
+    device->active_mode = off_mode;
     device->DeviceUpdateMode();
     device->DeviceUpdateLEDs();
 }
@@ -162,39 +160,55 @@ bool WakeRetriggerRunner::Run(std::vector<RGBController*>& rgb_controllers,
         return false;
     }
 
-    LOG_INFO("[WakeRetrigger] Verification passed; re-applying profile '%s' (%u attempts, %u s delay)",
-             config.profile_name.c_str(), config.attempts, config.delay);
+    /*-----------------------------------------------------*\
+    | Collect ONLY the DRAM controllers.  The whole feature  |
+    | exists to stop RAM RGB coming back on after wake; every |
+    | other device (keyboard, mouse, GPU, mainboard) keeps    |
+    | its own state across S3 and must NOT be touched.        |
+    \*-----------------------------------------------------*/
+    std::vector<RGBController*> dram_controllers;
+
+    for(std::size_t i = 0; i < rgb_controllers.size(); i++)
+    {
+        if(rgb_controllers[i]->type == DEVICE_TYPE_DRAM)
+        {
+            dram_controllers.push_back(rgb_controllers[i]);
+        }
+    }
+
+    LOG_INFO("[WakeRetrigger] Verification passed; forcing %u DRAM device(s) off (%u attempts, %u s delay)",
+             (unsigned int)dram_controllers.size(), config.attempts, config.delay);
 
     emit("Verifikation OK (CPU + Mainboard + RAM-Fingerprint).");
-    emit("Profil '" + config.profile_name + "', " + std::to_string(config.attempts)
-         + " Versuch(e), " + std::to_string(config.delay) + " s Verzoegerung.");
-    emit(std::to_string(rgb_controllers.size()) + " Geraet(e) erkannt.");
+    emit(std::to_string(dram_controllers.size()) + " RAM-Geraet(e) von "
+         + std::to_string(rgb_controllers.size()) + " gesamt - nur diese werden abgeschaltet.");
+    emit(std::to_string(config.attempts) + " Versuch(e), "
+         + std::to_string(config.delay) + " s Verzoegerung.");
+
+    if(dram_controllers.empty())
+    {
+        emit("Kein DRAM-Geraet gefunden - nichts zu tun.");
+        return true;
+    }
 
     /*-----------------------------------------------------*\
-    | Re-apply the profile config.attempts times.  Each      |
-    | attempt reloads the stored profile and pushes it to     |
-    | every controller via a nudge (target -> off-by-one ->   |
-    | target) so the hardware honours the state even when it  |
-    | equals what the device thinks it already holds after a  |
-    | wake, and even if the bus was not ready on the first try.|
+    | Force every DRAM controller off config.attempts times. |
+    | The handshake mode-cycle inside force_off makes the    |
+    | hardware honour the off state even when it ignored the |
+    | first try after a wake / before the bus was ready.     |
     \*-----------------------------------------------------*/
     for(unsigned int attempt = 0; attempt < config.attempts; attempt++)
     {
         emit("--- Versuch " + std::to_string(attempt + 1) + "/"
              + std::to_string(config.attempts) + " ---");
 
-        if(!config.profile_name.empty())
+        for(std::size_t i = 0; i < dram_controllers.size(); i++)
         {
-            ResourceManager::get()->GetProfileManager()->LoadProfile(config.profile_name);
+            wake_retrigger_force_off(dram_controllers[i]);
+            emit("  abgeschaltet: " + dram_controllers[i]->name);
         }
 
-        for(std::size_t i = 0; i < rgb_controllers.size(); i++)
-        {
-            wake_retrigger_apply_with_nudge(rgb_controllers[i]);
-            emit("  angewendet: " + rgb_controllers[i]->name);
-        }
-
-        LOG_INFO("[WakeRetrigger] Attempt %u/%u applied (with nudge)", attempt + 1, config.attempts);
+        LOG_INFO("[WakeRetrigger] Attempt %u/%u applied", attempt + 1, config.attempts);
 
         if(config.delay > 0)
         {
@@ -203,7 +217,7 @@ bool WakeRetriggerRunner::Run(std::vector<RGBController*>& rgb_controllers,
         }
     }
 
-    emit("Sequenz abgeschlossen.");
+    emit("Sequenz abgeschlossen - RAM aus.");
 
     return true;
 }
