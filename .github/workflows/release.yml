@@ -54,6 +54,21 @@ jobs:
         with:
           arch: x64
 
+      - name: Apply custom branding
+        shell: bash
+        run: |
+          # Force the custom window title / tray tooltip into every released
+          # build, independent of whether the source-level branding commit
+          # survives an upstream rebase. The sed is idempotent: if the source
+          # already carries the custom string it simply finds nothing to
+          # replace. If upstream ever renames the string outright, the final
+          # grep fails the build loudly instead of shipping a wrong title.
+          sed -i 's|<string>OpenRGB</string>|<string>OpenRGB Modified by KingchenC</string>|' qt/OpenRGBDialog/OpenRGBDialog.ui
+          sed -i 's|trayIcon->setToolTip("OpenRGB");|trayIcon->setToolTip("OpenRGB Modified by KingchenC");|' qt/OpenRGBDialog/OpenRGBDialog.cpp
+          grep -q 'OpenRGB Modified by KingchenC' qt/OpenRGBDialog/OpenRGBDialog.ui
+          grep -q 'OpenRGB Modified by KingchenC' qt/OpenRGBDialog/OpenRGBDialog.cpp
+          echo "Custom branding applied."
+
       - name: Configure build (qmake)
         shell: cmd
         run: qmake OpenRGB.pro CONFIG-=debug_and_release CONFIG+=release
