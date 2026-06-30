@@ -1,3 +1,22 @@
+## 🔱 KingchenC Fork
+
+> A personalised fork of **[CalcProgrammer1/OpenRGB](https://gitlab.com/CalcProgrammer1/OpenRGB)**.
+> The original upstream README is preserved below — this top section documents **only** what this
+> fork's workflows and customizations add. The `custom` branch is rebased on upstream daily.
+
+### Automated CI — `.github/workflows/`
+- **Upstream Sync** (daily, 06:00 UTC): rebases the `custom` branch onto `upstream/master`, strips
+  and disables inherited upstream automation, and opens an issue if a merge conflict needs manual
+  resolution.
+- **Build and Release** (after each successful sync, or manual `workflow_dispatch`): builds on a
+  Windows runner with **Qt 6.7.3 + MSVC** (qmake/nmake), bundles the Qt runtime via `windeployqt`,
+  packages `OpenRGB-Custom-Windows-x64`, and publishes a tagged GitHub Release.
+
+### Custom tweaks
+- **Branding** — the window title and tray tooltip read **"OpenRGB Modified by KingchenC"**.
+
+---
+
 ## ![OpenRGB](Documentation/Images/OpenRGB.png "OpenRGB Logo")
 
 ![Pipeline Status](https://gitlab.com/CalcProgrammer1/OpenRGB/badges/master/pipeline.svg)
