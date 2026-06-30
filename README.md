@@ -12,7 +12,18 @@
   Windows runner with **Qt 6.7.3 + MSVC** (qmake/nmake), bundles the Qt runtime via `windeployqt`,
   packages `OpenRGB-Custom-Windows-x64`, and publishes a tagged GitHub Release.
 
-### Custom tweaks
+### Custom features
+- **Wake Retrigger** — after the PC resumes from sleep, Windows often restores RAM (DRAM) RGB to
+  a default-on state. This feature re-applies the wanted state by forcing **only the DRAM
+  controllers OFF** (no other device is ever touched). On resume DRAM reverts to host/hardware
+  control, so it re-establishes software control via a mode-cycle handshake, then nudges each
+  device with configurable attempts + delay until the hardware honours the off state.
+  - **Hardware-aware & safe:** CPU detection plus a read-only SMBus/SPD fingerprint (3-stage
+    read-only verification) so it only acts on the recognised RAM configuration.
+  - **Headless trigger:** a Windows scheduled task runs `OpenRGB --wake-trigger` on wake/resume to
+    execute the retrigger loop in the background.
+  - **Settings UI** (`OpenRGBWakeRetriggerPage`): hardware scan, configuration, and a live **Test**
+    button with a log window.
 - **Branding** — the window title and tray tooltip read **"OpenRGB Modified by KingchenC"**.
 
 ---
