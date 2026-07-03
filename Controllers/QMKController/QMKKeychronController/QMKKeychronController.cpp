@@ -186,7 +186,7 @@ bool QMKKeychronController::GetSupported()
     return(supported_features & KC_FEATURE_KEYCHRON_RGB);
 }
 
-unsigned short QMKKeychronController::GetKeycode(unsigned short led_index)
+unsigned short QMKKeychronController::GetKeycode(unsigned char led_index)
 {
     return(keycodes[led_index]);
 }
@@ -196,7 +196,7 @@ unsigned short QMKKeychronController::GetLEDCount()
     return(number_leds);
 }
 
-qmk_rgb_matrix_led_info QMKKeychronController::GetLEDInfo(unsigned short led_index)
+qmk_rgb_matrix_led_info QMKKeychronController::GetLEDInfo(unsigned char led_index)
 {
     return(led_info[led_index]);
 }
@@ -206,9 +206,9 @@ void QMKKeychronController::SaveMode()
     CmdSaveMode();
 }
 
-void QMKKeychronController::SendLEDs(unsigned short number_leds, RGBColor* color_data)
+void QMKKeychronController::SendLEDs(unsigned char number_leds, RGBColor* color_data)
 {
-    unsigned short      led_start_index     = 0;
+    unsigned char       led_start_index     = 0;
     unsigned char       number_packet_leds  = 9;
 
     while(led_start_index < number_leds)
