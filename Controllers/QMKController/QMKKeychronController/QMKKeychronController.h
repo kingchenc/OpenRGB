@@ -400,11 +400,11 @@ public:
 
     bool                                    GetSupported();
 
-    unsigned short                          GetKeycode(unsigned short led_index);
+    unsigned short                          GetKeycode(unsigned char led_index);
     unsigned short                          GetLEDCount();
-    qmk_rgb_matrix_led_info                 GetLEDInfo(unsigned short led_index);
+    qmk_rgb_matrix_led_info                 GetLEDInfo(unsigned char led_index);
 
-    void                                    SendLEDs(unsigned short number_leds, RGBColor* color_data);
+    void                                    SendLEDs(unsigned char number_leds, RGBColor* color_data);
     void                                    SetMode(unsigned short mode, unsigned char speed, unsigned char hue, unsigned char sat, unsigned char val);
 
     void                                    SaveMode();
