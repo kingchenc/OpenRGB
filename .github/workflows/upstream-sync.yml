@@ -121,6 +121,7 @@ jobs:
 
       - name: Open issue on conflict
         if: steps.rebase.outputs.status == 'conflict'
+        continue-on-error: true
         uses: peter-evans/create-issue-from-file@v5
         with:
           title: '[URGENT] Merge-Konflikt bei Upstream-Sync'
