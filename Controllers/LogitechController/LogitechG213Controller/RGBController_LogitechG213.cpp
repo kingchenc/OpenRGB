@@ -137,6 +137,15 @@ void RGBController_LogitechG213::SetupZones()
 
 void RGBController_LogitechG213::DeviceUpdateLEDs()
 {
+    /*---------------------------------------------------------*\
+    | Only send direct packets in Direct mode, otherwise they   |
+    | overwrite the active hardware effect                      |
+    \*---------------------------------------------------------*/
+    if(modes[active_mode].value != 0xFFFF)
+    {
+        return;
+    }
+
     for(std::size_t led_idx = 0; led_idx < leds.size(); led_idx++)
     {
         controller->SetDirect((unsigned char)leds[led_idx].value, RGBGetRValue(colors[led_idx]), RGBGetGValue(colors[led_idx]), RGBGetBValue(colors[led_idx]));
@@ -145,11 +154,21 @@ void RGBController_LogitechG213::DeviceUpdateLEDs()
 
 void RGBController_LogitechG213::DeviceUpdateZoneLEDs(int zone)
 {
+    if(modes[active_mode].value != 0xFFFF)
+    {
+        return;
+    }
+
     controller->SetDirect((unsigned char) zone, RGBGetRValue(zones[zone].colors[0]), RGBGetGValue(zones[zone].colors[0]), RGBGetBValue(zones[zone].colors[0]));
 }
 
 void RGBController_LogitechG213::DeviceUpdateSingleLED(int led)
 {
+    if(modes[active_mode].value != 0xFFFF)
+    {
+        return;
+    }
+
     controller->SetDirect(leds[led].value, RGBGetRValue(colors[led]), RGBGetGValue(colors[led]), RGBGetBValue(colors[led]));
 }
 
@@ -159,7 +178,7 @@ void RGBController_LogitechG213::DeviceUpdateMode()
     | Direct mode does not send a mode packet                   |
     | Call UpdateLEDs to send direct packet                     |
     \*---------------------------------------------------------*/
-    if(active_mode == 0xFFFF)
+    if(modes[active_mode].value == 0xFFFF)
     {
         UpdateLEDsInternal();
         return;
