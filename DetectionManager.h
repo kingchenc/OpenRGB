@@ -228,6 +228,13 @@ public:
     void                                UnregisterRGBController(RGBController *rgb_controller);
 
     /*-----------------------------------------------------*\
+    | Run the HID detectors for one device outside a        |
+    | detection pass, like a hotplug event, for a device    |
+    | that was not ready during detection                   |
+    \*-----------------------------------------------------*/
+    void                                DetectHIDDevice(hid_device_info* device);
+
+    /*-----------------------------------------------------*\
     | Detection state functions                             |
     \*-----------------------------------------------------*/
     void                                AbortDetection();

@@ -7,7 +7,9 @@
 |   SPDX-License-Identifier: GPL-2.0-or-later               |
 \*---------------------------------------------------------*/
 
+#include <condition_variable>
 #include <map>
+#include <mutex>
 #include <set>
 #include <thread>
 #include <hidapi.h>
@@ -1602,6 +1604,254 @@ DetectedControllers CreateLogitechLightspeedDevice(char *path, usages device_usa
     return(detected_controllers);
 }
 
+/*---------------------------------------------------------------------------------------------------------*\
+| Late connect for wireless headsets on their own receiver (G733)                                           |
+|                                                                                                           |
+| While the headset is switched off its receiver still answers the name and feature list, but the LED       |
+| count request fails, so detection skips it. The receiver stays plugged in, so no hotplug event follows    |
+| when the headset is switched on. Poll such a node until the headset answers, then detect it again.        |
+\*---------------------------------------------------------------------------------------------------------*/
+#define LOGITECH_LATE_CONNECT_INTERVAL              std::chrono::seconds(10)
+
+struct LogitechLateConnectNode
+{
+    std::string     path;
+    std::wstring    manufacturer;
+    std::wstring    product;
+    unsigned short  vendor_id;
+    unsigned short  product_id;
+    int             interface_number;
+    unsigned short  usage_page;
+    unsigned short  usage;
+    hid_bus_type    bus_type;
+};
+
+static std::vector<LogitechLateConnectNode>     logitech_late_connect_nodes;
+static std::mutex                               logitech_late_connect_mutex;
+static std::condition_variable                  logitech_late_connect_cv;
+static std::thread*                             logitech_late_connect_thread    = nullptr;
+static bool                                     logitech_late_connect_stop      = false;
+
+/*---------------------------------------------------------*\
+| Send one long FAP request, skipping unrelated reports.    |
+| Returns false on timeout or a HID++ error report.         |
+\*---------------------------------------------------------*/
+static bool LogitechLateConnectRequest(hid_device* dev, longFAPrequest& request, blankFAPmessage& response)
+{
+    if(hid_write(dev, request.buffer, request.size()) < 0)
+    {
+        return(false);
+    }
+
+    for(int read_idx = 0; read_idx < 8; read_idx++)
+    {
+        response.init();
+
+        if(hid_read_timeout(dev, response.buffer, response.size(), LOGITECH_PROTOCOL_TIMEOUT) <= 0)
+        {
+            return(false);
+        }
+
+        if((response.feature_index == request.feature_index) && (response.feature_command == request.feature_command))
+        {
+            return(true);
+        }
+
+        if((response.feature_index == 0xFF) && (response.feature_command == request.feature_index))
+        {
+            return(false);
+        }
+    }
+
+    return(false);
+}
+
+/*---------------------------------------------------------*\
+| Does the headset itself answer the LED count request?     |
+\*---------------------------------------------------------*/
+static bool LogitechLateConnectAnswers(const std::string& path)
+{
+    hid_device* dev     = hid_open_path(path.c_str());
+    bool        answers = false;
+
+    if(dev == nullptr)
+    {
+        return(false);
+    }
+
+    blankFAPmessage response;
+    longFAPrequest  request;
+
+    request.init(LOGITECH_DEFAULT_DEVICE_INDEX, LOGITECH_HIDPP_PAGE_ROOT_IDX, LOGITECH_CMD_ROOT_GET_FEATURE);
+    request.data[0] = LOGITECH_HIDPP_PAGE_RGB_EFFECTS1 >> 8;
+    request.data[1] = LOGITECH_HIDPP_PAGE_RGB_EFFECTS1 & 0xFF;
+
+    if(LogitechLateConnectRequest(dev, request, response) && (response.data[0] != 0))
+    {
+        request.init(LOGITECH_DEFAULT_DEVICE_INDEX, response.data[0], LOGITECH_CMD_RGB_EFFECTS_GET_COUNT);
+
+        answers = LogitechLateConnectRequest(dev, request, response) && (response.data[0] > 0);
+    }
+
+    hid_close(dev);
+
+    return(answers);
+}
+
+static bool LogitechLateConnectHasController(const std::string& path)
+{
+    DetectionManager*   dm      = DetectionManager::get();
+    bool                found   = false;
+
+    dm->LockRGBControllers();
+
+    /*-----------------------------------------------------*\
+    | The Lightspeed controller location holds the node     |
+    | path it was built on                                  |
+    \*-----------------------------------------------------*/
+    for(RGBController* controller : dm->GetRGBControllers())
+    {
+        if(controller->GetLocation().find(path) != std::string::npos)
+        {
+            found = true;
+            break;
+        }
+    }
+
+    dm->UnlockRGBControllers();
+
+    return(found);
+}
+
+static void LogitechLateConnectThreadFunction()
+{
+    std::unique_lock<std::mutex> lock(logitech_late_connect_mutex);
+
+    while(!logitech_late_connect_stop)
+    {
+        logitech_late_connect_cv.wait_for(lock, LOGITECH_LATE_CONNECT_INTERVAL, []{ return(logitech_late_connect_stop); });
+
+        if(logitech_late_connect_stop)
+        {
+            break;
+        }
+
+        std::vector<LogitechLateConnectNode> nodes = logitech_late_connect_nodes;
+
+        lock.unlock();
+
+        for(const LogitechLateConnectNode& node : nodes)
+        {
+            bool detected = LogitechLateConnectHasController(node.path);
+
+            if(!detected && LogitechLateConnectAnswers(node.path))
+            {
+                hid_device_info info        = {};
+
+                info.path                   = (char*)node.path.c_str();
+                info.vendor_id              = node.vendor_id;
+                info.product_id             = node.product_id;
+                info.manufacturer_string    = (wchar_t*)node.manufacturer.c_str();
+                info.product_string         = (wchar_t*)node.product.c_str();
+                info.serial_number          = (wchar_t*)L"";
+                info.usage_page             = node.usage_page;
+                info.usage                  = node.usage;
+                info.interface_number       = node.interface_number;
+                info.bus_type               = node.bus_type;
+
+                LOG_INFO("[Logitech] Headset on %s answers now, detecting it", node.path.c_str());
+
+                DetectionManager::get()->DetectHIDDevice(&info);
+
+                detected = LogitechLateConnectHasController(node.path);
+            }
+
+            if(detected)
+            {
+                std::lock_guard<std::mutex> nodes_lock(logitech_late_connect_mutex);
+
+                for(std::vector<LogitechLateConnectNode>::iterator it = logitech_late_connect_nodes.begin(); it != logitech_late_connect_nodes.end(); it++)
+                {
+                    if(it->path == node.path)
+                    {
+                        logitech_late_connect_nodes.erase(it);
+                        break;
+                    }
+                }
+            }
+        }
+
+        lock.lock();
+    }
+}
+
+static void LogitechLateConnectWatch(hid_device_info* info)
+{
+    std::lock_guard<std::mutex> lock(logitech_late_connect_mutex);
+
+    if(logitech_late_connect_stop)
+    {
+        return;
+    }
+
+    for(const LogitechLateConnectNode& node : logitech_late_connect_nodes)
+    {
+        if(node.path == info->path)
+        {
+            return;
+        }
+    }
+
+    LogitechLateConnectNode node;
+
+    node.path               = info->path;
+    node.manufacturer       = info->manufacturer_string ? info->manufacturer_string : L"";
+    node.product            = info->product_string      ? info->product_string      : L"";
+    node.vendor_id          = info->vendor_id;
+    node.product_id         = info->product_id;
+    node.interface_number   = info->interface_number;
+    node.usage_page         = info->usage_page;
+    node.usage              = info->usage;
+    node.bus_type           = info->bus_type;
+
+    logitech_late_connect_nodes.push_back(node);
+
+    LOG_INFO("[Logitech] Headset on %s is not answering (switched off?), watching it", info->path);
+
+    if(logitech_late_connect_thread == nullptr)
+    {
+        logitech_late_connect_thread = new std::thread(LogitechLateConnectThreadFunction);
+    }
+}
+
+/*---------------------------------------------------------*\
+| The watcher thread has to be stopped before the process   |
+| exits.                                                    |
+\*---------------------------------------------------------*/
+class LogitechLateConnectShutdown
+{
+public:
+    ~LogitechLateConnectShutdown()
+    {
+        {
+            std::lock_guard<std::mutex> lock(logitech_late_connect_mutex);
+
+            logitech_late_connect_stop = true;
+        }
+
+        logitech_late_connect_cv.notify_all();
+
+        if(logitech_late_connect_thread != nullptr)
+        {
+            logitech_late_connect_thread->join();
+            delete logitech_late_connect_thread;
+            logitech_late_connect_thread = nullptr;
+        }
+    }
+};
+
+static LogitechLateConnectShutdown logitech_late_connect_shutdown;
+
 DetectedControllers DetectLogitechWired(hid_device_info* info, const std::string& /*name*/)
 {
     /*-----------------------------------------------------------------*\
@@ -1626,6 +1876,12 @@ DetectedControllers DetectLogitechWired(hid_device_info* info, const std::string
     if(device_usages.size() > 0)
     {
         detected_controllers = CreateLogitechLightspeedDevice(info->path, device_usages, LOGITECH_DEFAULT_DEVICE_INDEX, info->product_id, false, nullptr);
+    }
+
+    if(detected_controllers.empty()
+    && ((info->product_id == LOGITECH_G733_PID) || (info->product_id == LOGITECH_G733_2_PID) || (info->product_id == LOGITECH_G733_3_PID)))
+    {
+        LogitechLateConnectWatch(info);
     }
 
     return(detected_controllers);

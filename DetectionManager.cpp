@@ -534,6 +534,21 @@ void DetectionManager::UnregisterRGBController(RGBController* rgb_controller)
     SignalUpdate(DETECTIONMANAGER_UPDATE_REASON_RGBCONTROLLER_UNREGISTERED);
 }
 
+void DetectionManager::DetectHIDDevice(hid_device_info* device)
+{
+    /*-----------------------------------------------------*\
+    | A detection pass in flight may detect this device     |
+    | itself, wait for it to finish first                   |
+    \*-----------------------------------------------------*/
+    WaitForDetection();
+
+    json detector_settings = ResourceManager::get()->GetSettingsManager()->GetSettings("Detectors");
+
+    LOG_INFO("[%s] Detecting HID device late: [%04x:%04x - %s]", DETECTIONMANAGER, device->vendor_id, device->product_id, device->path);
+
+    RunHIDDetector(device, detector_settings);
+}
+
 /*---------------------------------------------------------*\
 | Detection state functions                                 |
 \*---------------------------------------------------------*/
