@@ -1505,6 +1505,22 @@ void OpenRGBDialog::OnSuspend()
 {
     if(ResourceManager::get()->GetProfileManager()->LoadAutoProfileSuspend())
     {
+        /*-------------------------------------------------*\
+        | The profile is only queued to each controller's   |
+        | device thread.  Wait until it has been written,   |
+        | otherwise the system may enter sleep first and    |
+        | devices that stay powered (e.g. DRAM in S3) keep  |
+        | their previous lighting.                          |
+        \*-------------------------------------------------*/
+        std::vector<RGBController *> controllers = ResourceManager::get()->GetRGBControllers();
+
+        for(std::size_t controller_idx = 0; controller_idx < controllers.size(); controller_idx++)
+        {
+            controllers[controller_idx]->WaitForDeviceUpdate();
+        }
+
+        LOG_INFO("[OpenRGBDialog] Suspend profile written to %d controllers", (int)controllers.size());
+
         plugin_manager->UnloadPlugins();
     }
 }
